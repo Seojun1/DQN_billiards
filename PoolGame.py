@@ -1,261 +1,163 @@
-# PoolGame by Python Programming Language, By Rajneesh Dangar (Twitter: @rajneesh_dangar), Hope You Like It!....Date: 20/10/2022.
-
+import pygame
 import math
 
-import pygame
-import pymunk
-import pymunk.pygame_util
-
+# 초기화
 pygame.init()
 
-SCREEN_WIDTH = 1200
-SCREEN_HEIGHT = 678
-BOTTOM_PANEL = 50
+# 색상 정의
+WHITE = (255, 255, 255)
+RED = (255, 0, 0)
+YELLOW = (255, 255, 0)
 
-#Game_Window
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT + BOTTOM_PANEL))
-pygame.display.set_caption("PoolGame")
+# 화면 크기 설정
+WIDTH, HEIGHT = 800, 500
+screen = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_caption('4구 당구 게임')
 
-#Pymunk_Space
-space = pymunk.Space()
-static_body = space.static_body
-draw_options = pymunk.pygame_util.DrawOptions(screen)
+# 배경 이미지 로드
+background = pygame.image.load('assets/background.png')
+background = pygame.transform.scale(background, (WIDTH, HEIGHT))
 
-#Clock
+# 공 클래스 정의
+class Ball:
+    def __init__(self, x, y, color):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.radius = 10
+        self.vx = 0
+        self.vy = 0
+
+    def draw(self, screen):
+        pygame.draw.circle(screen, self.color, (int(self.x), int(self.y)), self.radius)
+
+    def update(self):
+        self.x += self.vx
+        self.y += self.vy
+
+        # 벽 충돌
+        if self.x - self.radius < 50 or self.x + self.radius > WIDTH - 50:
+            self.vx = -self.vx
+        if self.y - self.radius < 50 or self.y + self.radius > HEIGHT - 50:
+            self.vy = -self.vy
+
+        # 감속 (마찰력)
+        self.vx *= 0.99
+        self.vy *= 0.99
+
+    def hit(self, power, angle):
+        self.vx = power * math.cos(angle)
+        self.vy = power * math.sin(angle)
+
+# 충돌 처리 함수
+def check_collision(ball1, ball2):
+    dx = ball1.x - ball2.x
+    dy = ball1.y - ball2.y
+    distance = math.sqrt(dx**2 + dy**2)
+
+    if distance < ball1.radius + ball2.radius:
+        overlap = 0.5 * (distance - ball1.radius - ball2.radius)
+
+        ball1.x -= overlap * (ball1.x - ball2.x) / distance
+        ball1.y -= overlap * (ball1.y - ball2.y) / distance
+        ball2.x += overlap * (ball1.x - ball2.x) / distance
+        ball2.y += overlap * (ball1.y - ball2.y) / distance
+
+        angle = math.atan2(dy, dx)
+        sin_a = math.sin(angle)
+        cos_a = math.cos(angle)
+
+        # 회전 행렬 적용
+        v1x = ball1.vx * cos_a + ball1.vy * sin_a
+        v1y = ball1.vy * cos_a - ball1.vx * sin_a
+        v2x = ball2.vx * cos_a + ball2.vy * sin_a
+        v2y = ball2.vy * cos_a - ball2.vx * sin_a
+
+        # 속도 교환
+        ball1.vx = v2x * cos_a - v1y * sin_a
+        ball1.vy = v1y * cos_a + v2x * sin_a
+        ball2.vx = v1x * cos_a - v2y * sin_a
+        ball2.vy = v2y * cos_a + v1x * sin_a
+
+        return True
+    return False
+
+# 공 생성
+cue_ball = Ball(WIDTH // 2, HEIGHT // 4, WHITE)
+red_ball1 = Ball(WIDTH // 3, HEIGHT // 2, RED)
+red_ball2 = Ball(2 * WIDTH // 3, HEIGHT // 2, RED)
+yellow_ball = Ball(WIDTH // 2, 3 * HEIGHT // 4, YELLOW)
+balls = [cue_ball, red_ball1, red_ball2, yellow_ball]
+
+# 메인 루프
+running = True
 clock = pygame.time.Clock()
-FPS = 120
+score = 0
+shooting = False
+hit_red1 = False
+hit_red2 = False
+hit_yellow = False
 
-#Game_Variables
-lives = 3
-dia = 36
-force = 0
-pocket_dia = 66
-max_force = 10000
-force_direction = 1
-game_running = True
-cue_ball_potted = False
-taking_shot = True
-powering_up = False
-potted_balls = []
+# 추가된 변수
+mouse_down_time = 0
+mouse_up_time = 0
 
-#Colours
-BG = (50,50,50)
-RED = (255,0,0)
-WHITE = (255,255,255)
-
-#Fonts
-font = pygame.font.SysFont("Lato", 30)
-large_font = pygame.font.SysFont("Lato", 60)
-
-#Load_Images
-cue_image = pygame.image.load("Assets/images/cue.png").convert_alpha()
-table_image = pygame.image.load("Assets/images/table.png").convert_alpha()
-ball_images = []
-for i in range(1, 17):
-    ball_image = pygame.image.load(f"Assets/images/ball_{i}.png").convert_alpha()
-    ball_images.append(ball_image)
-
-#Function_For_OutPutting_Text
-def draw_text(text, font, text_col, x, y):
-    img = font.render(text, True, text_col)
-    screen.blit(img, (x, y))
-
-#Function_For_Creating_Balls
-def create_ball(radius, pos):
-    body = pymunk.Body()
-    body.position = pos
-    shape = pymunk.Circle(body, radius)
-    shape.mass = 3
-    shape.elasticity = 0.8
-    #Use_Pivot_Joint_to_add_Friction
-    pivot = pymunk.PivotJoint(static_body, body, (0,0), (0,0))
-    pivot.max_bias = 0 #Disable_Joint_correction
-    pivot.max_force = 1000 #Emulate_Linear_Friction
-    space.add(body, shape, pivot)
-    return shape
-
-
-#SetUp_Game_Balls
-balls = []
-rows = 5
-
-#Potting_Balls
-for col in range(5):
-    for row in range(rows):
-        pos = (250 + (col * (dia + 1)), 267 + (row * (dia + 1)) + (col * dia / 2))
-        new_ball  = create_ball(dia / 2, pos)
-        balls.append(new_ball)
-    rows -= 1
-
-#Cue_Ball
-pos = (888, SCREEN_HEIGHT / 2)
-cue_ball = create_ball(dia / 2, pos)
-balls.append(cue_ball)
-
-#Create_Six_Pockets
-pockets = [
-  (55, 63),
-  (592, 48),
-  (1134, 64),
-  (55, 616),
-  (592, 629),
-  (1134, 616)
-]
-
-#Create_Pool_Table_cushions
-cushions = [
-    [(88, 56), (109, 77), (555, 77), (564, 56)],
-    [(621, 56), (630, 77), (1081, 77), (1102, 56)],
-    [(89, 621), (110, 600),(556, 600), (564, 621)],
-    [(622, 621), (630, 600), (1081, 600), (1102, 621)],
-    [(56, 96), (77, 117), (77, 560), (56, 581)],
-    [(1143, 96), (1122, 117), (1122, 560), (1143, 581)],
-]
-
-#Function_For_Creating_Cushions
-def create_cushion(poly_dims):
-    body = pymunk.Body(body_type = pymunk.Body.STATIC)
-    body.position = ((0,0))
-    shape = pymunk.Poly(body, poly_dims)
-    shape.elasticity = 0.8
-    space.add(body, shape)
-
-for c in cushions:
-    create_cushion(c)
-
-    
-#Create_Pool_Cue
-class Cue():
-    def __init__(self, pos):
-        self.original_image = cue_image
-        self.angle = 0
-        self.image = pygame.transform.rotate(self.original_image, self.angle)
-        self.rect = self.image.get_rect()
-        self.rect.center = pos 
-
-    def update(self, angle):
-        self.angle = angle
-
-    def draw(self, surface):
-        self.image = pygame.transform.rotate(self.original_image, self.angle)
-        surface.blit(self.image,
-            (self.rect.centerx - self.image.get_width() / 2,
-            self.rect.centery - self.image.get_height() / 2))
-
-cue = Cue(balls[-1].body.position)
-
-#Create_Power_Bars
-power_bar = pygame.Surface((10, 20))
-power_bar.fill(RED)
-
-        
-#Game_Loop
-run = True
-while run:
-
-    clock.tick(FPS)
-    space.step(1 / FPS)
-
-    #Fill_Background
-    screen.fill(BG)
-
-    #Draw_Pool_Table
-    screen.blit(table_image, (0,0))
-
-    #Check_If_Any_Balls_Have_Been_Potted
-    for i, ball in enumerate(balls):
-        for pocket in pockets:
-            ball_x_dist = abs(ball.body.position[0] - pocket[0])
-            ball_y_dist = abs(ball.body.position[1] - pocket[1])
-            ball_dist = math.sqrt((ball_x_dist ** 2) + (ball_y_dist ** 2))
-            if ball_dist <= pocket_dia / 2:
-                #Check_If_Potted_Ball_Was_A_Cue_Ball
-                if i == len(balls) - 1:
-                    lives -= 1
-                    cue_ball_potted = True
-                    ball.body.position = (-100, -100)
-                    ball.body.velocity = (0.0, 0.0)
-                else:
-                    space.remove(ball.body)
-                    balls.remove(ball)
-                    potted_balls.append(ball_images[i])
-                    ball_images.pop(i)
- 
-    #Draw_Pool_Balls
-    for i, ball in enumerate(balls):
-        screen.blit(ball_images[i], (ball.body.position[0] - ball.radius, ball.body.position[1] - ball.radius))
-
-    #Check_If_All_The_Balls_Have_Stopped_Moving
-    taking_shot = True
-    for ball in balls:
-        if int(ball.body.velocity[0]) != 0 or int(ball.body.velocity[1]) != 0:
-            taking_shot = False
-
-    #Draw_Pool_Cue
-    if taking_shot == True and game_running == True:
-        if cue_ball_potted == True:
-            #Reposition_Cue_Ball
-            balls[-1].body.position = (888, SCREEN_HEIGHT / 2)
-            cue_ball_potted = False
-
-        #Calculate_Pool_Cue_Angle
-        mouse_pos = pygame.mouse.get_pos()
-        cue.rect.center = balls[-1].body.position
-        x_dist = balls[-1].body.position[0] - mouse_pos[0]
-        y_dist = -(balls[-1].body.position[1] - mouse_pos[1]) # -ve_Because_Pygame_Y_Cordinates_Increase_Down_The_Screen.
-        cue_angle = math.degrees(math.atan2(y_dist, x_dist))
-        cue.update(cue_angle)
-        cue.draw(screen)
-
-    #Power_Up_Pool_Cue
-    if powering_up == True and game_running == True:
-        force += 100 * force_direction
-        if force >= max_force or force <= 0:
-          force_direction *= -1
-
-        #Draw_Power_Bars
-        for b in range(math.ceil(force / 2000)):
-            screen.blit(power_bar, 
-            (balls[-1].body.position[0] - 30 + (b * 15),
-            balls[-1].body.position[1] + 30))
-
-    elif powering_up == False and taking_shot == True: 
-        x_impulse = math.cos(math.radians(cue_angle))
-        y_impulse = math.sin(math.radians(cue_angle))
-        balls[-1].body.apply_impulse_at_local_point(( force * -x_impulse, force * y_impulse), (0,0))
-        force = 0
-        force_direction = 1
- 
-    #Draw_Bottom_Panel
-    pygame.draw.rect(screen, BG, (0, SCREEN_HEIGHT, SCREEN_WIDTH, BOTTOM_PANEL))
-    draw_text("LIVES: " + str(lives), font, WHITE, SCREEN_WIDTH - 200, SCREEN_HEIGHT + 10)
-
-    #Draw_Potted_Balls_In_Bottom_Panel
-    for i, ball in enumerate(potted_balls):
-        screen.blit(ball, (10 + (i * 50), SCREEN_HEIGHT + 10))
-
-    #Check_For_Game_Over
-    if lives <= 0:
-            draw_text("GAME OVER", large_font, WHITE, SCREEN_WIDTH / 2 - 160, SCREEN_HEIGHT / 2 - 100)
-            game_running = False
-
-    #Check_If_Balls_Are_Potted
-    if len(balls) == 1:
-            draw_text("YOU WIN!", large_font, WHITE, SCREEN_WIDTH / 2 - 160, SCREEN_HEIGHT / 2 - 100)
-            game_running = False
-
-    #Event_Handler
+while running:
     for event in pygame.event.get():
-        if event.type == pygame.MOUSEBUTTONDOWN and taking_shot == True:
-            powering_up = True
-
-        if event.type == pygame.MOUSEBUTTONUP and taking_shot == True:
-            powering_up = False
-
         if event.type == pygame.QUIT:
-            run = False
+            running = False
+        elif event.type == pygame.MOUSEBUTTONDOWN:
+            if not shooting:
+                mouse_down_time = pygame.time.get_ticks()
+        elif event.type == pygame.MOUSEBUTTONUP:
+            if not shooting:
+                mouse_up_time = pygame.time.get_ticks()
+                mouse_x, mouse_y = pygame.mouse.get_pos()
+                dx = mouse_x - cue_ball.x
+                dy = mouse_y - cue_ball.y
+                angle = math.atan2(dy, dx)
+                power = min((mouse_up_time - mouse_down_time) / 100, 20)  # 힘 조절
+                cue_ball.hit(power, angle)
+                shooting = True
+                hit_red1 = False
+                hit_red2 = False
+                hit_yellow = False
 
-    # space.debug_draw(draw_options)
-    pygame.display.update()
+    # 배경 이미지 그리기
+    screen.blit(background, (0, 0))
+
+    # 공 업데이트 및 그리기
+    for ball in balls:
+        ball.update()
+        ball.draw(screen)
+
+    # 공 충돌 처리
+    for i in range(len(balls)):
+        for j in range(i + 1, len(balls)):
+            if check_collision(balls[i], balls[j]):
+                if balls[i] == cue_ball or balls[j] == cue_ball:
+                    if balls[i].color == RED or balls[j].color == RED:
+                        if balls[i] == red_ball1 or balls[j] == red_ball1:
+                            hit_red1 = True
+                        if balls[i] == red_ball2 or balls[j] == red_ball2:
+                            hit_red2 = True
+                    elif balls[i].color == YELLOW or balls[j].color == YELLOW:
+                        hit_yellow = True
+
+    # 공이 멈추면 점수 계산
+    if shooting and all(abs(ball.vx) < 0.1 and abs(ball.vy) < 0.1 for ball in balls):
+        shooting = False
+        if hit_red1 and hit_red2 and not hit_yellow:
+            score += 1
+        elif hit_yellow:
+            score -= 1
+
+    # 점수 표시
+    font = pygame.font.Font(None, 36)
+    text = font.render(f"Score: {score}", True, WHITE)
+    screen.blit(text, (10, 10))
+
+    pygame.display.flip()
+    clock.tick(60)
 
 pygame.quit()

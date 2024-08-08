@@ -1,4 +1,4 @@
-1. python 3.10 
-2. pygame
-3. pymunk
-4. math
+gym==0.23.1
+numpy==2.0.1
+pygame==2.5.2
+torch==2.1.1
